@@ -13,8 +13,20 @@ const catalogLoading = ref(false)
 const catalogError = ref("")
 const searchQuery = ref("")
 const selectedDatasetIds = ref<string[]>([])
-type CatalogDataset = { id: string; title: string; description: string; organization: string; organizationLogo?: string; resources: number; lastUpdate?: string; url: string }
+const selectionMode = ref<"datasets" | "organizations" | "keywords">("datasets")
+type CatalogDataset = { id: string; title: string; description: string; organization: string; organizationId?: string; organizationLogo?: string; resources: number; lastUpdate?: string; tags: string[]; url: string }
+type CatalogOrganization = { id: string; name: string; acronym?: string; description: string; logo?: string; datasets: number; url: string }
 const catalogResults = ref<CatalogDataset[]>([])
+const organizationResults = ref<CatalogOrganization[]>([])
+const selectedOrganizations = ref<CatalogOrganization[]>([])
+const selectedKeywords = ref<string[]>([])
+const keywordInput = ref("")
+const suggestedKeywords = computed(() => {
+  const counts = new Map<string, number>()
+  catalogResults.value.flatMap(dataset => dataset.tags).forEach(tag => counts.set(tag, (counts.get(tag) ?? 0) + 1))
+  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 16).map(([tag]) => tag)
+})
+const totalRules = computed(() => selectedDatasetIds.value.length + selectedOrganizations.value.length + selectedKeywords.value.length)
 const audienceInput = ref("")
 const framing = reactive({
   title: "",
@@ -74,6 +86,31 @@ async function searchCatalog() {
   }
 }
 
+async function searchOrganizations() {
+  const query = searchQuery.value.trim()
+  if (!query) return
+  catalogLoading.value = true
+  catalogError.value = ""
+  try {
+    const response = await $fetch<{ organizations: CatalogOrganization[] }>("/api/catalog/organizations", { query: { q: query } })
+    organizationResults.value = response.organizations
+  } catch {
+    catalogError.value = "La recherche d’organisations n’a pas pu aboutir."
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+function runActiveSearch() {
+  return selectionMode.value === "organizations" ? searchOrganizations() : searchCatalog()
+}
+
+function setSelectionMode(mode: "datasets" | "organizations" | "keywords") {
+  selectionMode.value = mode
+  catalogError.value = ""
+  if (mode === "organizations" && !organizationResults.value.length) searchOrganizations()
+}
+
 async function openSelection() {
   selectionOpened.value = true
   searchQuery.value = framing.title.replace(/^Données (de |des |du |d’|d')?/i, "").trim()
@@ -84,6 +121,20 @@ async function openSelection() {
 
 function toggleDataset(id: string) {
   selectedDatasetIds.value = selectedDatasetIds.value.includes(id) ? selectedDatasetIds.value.filter(item => item !== id) : [...selectedDatasetIds.value, id]
+}
+
+function toggleOrganization(organization: CatalogOrganization) {
+  selectedOrganizations.value = selectedOrganizations.value.some(item => item.id === organization.id) ? selectedOrganizations.value.filter(item => item.id !== organization.id) : [...selectedOrganizations.value, organization]
+}
+
+function addKeyword(value = keywordInput.value) {
+  const keyword = value.trim().toLocaleLowerCase()
+  if (keyword && !selectedKeywords.value.includes(keyword)) selectedKeywords.value.push(keyword)
+  keywordInput.value = ""
+}
+
+function removeKeyword(keyword: string) {
+  selectedKeywords.value = selectedKeywords.value.filter(item => item !== keyword)
 }
 
 function formatDate(value?: string) {
@@ -184,17 +235,22 @@ function formatDate(value?: string) {
         <section v-if="selectionOpened" id="dataset-selection" class="dataset-selection" aria-labelledby="selection-title">
           <header class="selection-header">
             <div><p class="section-kicker">02 · Sélectionner</p><h2 id="selection-title">Identifier les données pertinentes</h2><p>Les résultats proviennent directement du catalogue public data.gouv.fr. Rien n’est copié dans le studio.</p></div>
-            <span class="selection-count">{{ selectedDatasetIds.length }} sélectionné{{ selectedDatasetIds.length > 1 ? 's' : '' }}</span>
+            <span class="selection-count">{{ totalRules }} critère{{ totalRules > 1 ? 's' : '' }}</span>
           </header>
-          <form class="catalog-search" @submit.prevent="searchCatalog">
+          <div class="selection-tabs" role="tablist" aria-label="Mode de sélection">
+            <button type="button" role="tab" :aria-selected="selectionMode === 'datasets'" @click="setSelectionMode('datasets')"><i class="ri-database-2-line" aria-hidden="true" /> Jeux de données <span>{{ selectedDatasetIds.length }}</span></button>
+            <button type="button" role="tab" :aria-selected="selectionMode === 'organizations'" @click="setSelectionMode('organizations')"><i class="ri-government-line" aria-hidden="true" /> Organisations <span>{{ selectedOrganizations.length }}</span></button>
+            <button type="button" role="tab" :aria-selected="selectionMode === 'keywords'" @click="setSelectionMode('keywords')"><i class="ri-price-tag-3-line" aria-hidden="true" /> Mots-clés <span>{{ selectedKeywords.length }}</span></button>
+          </div>
+          <form v-if="selectionMode !== 'keywords'" class="catalog-search" @submit.prevent="runActiveSearch">
             <i class="ri-search-line" aria-hidden="true" />
             <label class="sr-only" for="catalog-query">Rechercher dans data.gouv.fr</label>
-            <input id="catalog-query" v-model="searchQuery" type="search" placeholder="Éducation, établissements scolaires, réussite…">
+            <input id="catalog-query" v-model="searchQuery" type="search" :placeholder="selectionMode === 'organizations' ? 'Ministère, opérateur, collectivité…' : 'Éducation, établissements scolaires, réussite…'">
             <button type="submit" :disabled="catalogLoading || !searchQuery.trim()"><span v-if="catalogLoading" class="spinner" aria-hidden="true" />{{ catalogLoading ? 'Recherche…' : 'Rechercher' }}</button>
           </form>
           <p v-if="catalogError" class="catalog-error" role="alert"><i class="ri-error-warning-line" aria-hidden="true" /> {{ catalogError }}</p>
           <div v-else-if="catalogLoading" class="catalog-loading" role="status"><span class="spinner" aria-hidden="true" /> Interrogation du catalogue data.gouv.fr…</div>
-          <div v-else-if="catalogResults.length" class="dataset-list">
+          <div v-else-if="selectionMode === 'datasets' && catalogResults.length" class="dataset-list">
             <article v-for="dataset in catalogResults" :key="dataset.id" :class="{ selected: selectedDatasetIds.includes(dataset.id) }">
               <div class="dataset-logo"><img v-if="dataset.organizationLogo" :src="dataset.organizationLogo" alt=""><i v-else class="ri-government-line" aria-hidden="true" /></div>
               <div class="dataset-content">
@@ -208,10 +264,22 @@ function formatDate(value?: string) {
               </button>
             </article>
           </div>
-          <div v-else class="empty-results"><i class="ri-folder-search-line" aria-hidden="true" /><p>Aucun jeu de données trouvé.</p><span>Essayez un terme plus précis ou un synonyme.</span></div>
+          <div v-else-if="selectionMode === 'organizations' && organizationResults.length" class="organization-list">
+            <article v-for="organization in organizationResults" :key="organization.id" :class="{ selected: selectedOrganizations.some(item => item.id === organization.id) }">
+              <div class="dataset-logo"><img v-if="organization.logo" :src="organization.logo" alt=""><i v-else class="ri-government-line" aria-hidden="true" /></div>
+              <div><h3><a :href="organization.url" target="_blank" rel="noreferrer">{{ organization.name }} <span v-if="organization.acronym">({{ organization.acronym }})</span> <i class="ri-external-link-line" aria-hidden="true" /></a></h3><p class="organization-metric">{{ organization.datasets }} jeu{{ organization.datasets > 1 ? 'x' : '' }} de données publié{{ organization.datasets > 1 ? 's' : '' }}</p><p>{{ organization.description || 'Aucune description disponible.' }}</p></div>
+              <button class="dataset-select" type="button" :aria-pressed="selectedOrganizations.some(item => item.id === organization.id)" @click="toggleOrganization(organization)"><i :class="selectedOrganizations.some(item => item.id === organization.id) ? 'ri-checkbox-circle-fill' : 'ri-add-circle-line'" aria-hidden="true" />{{ selectedOrganizations.some(item => item.id === organization.id) ? 'Sélectionnée' : 'Ajouter' }}</button>
+            </article>
+          </div>
+          <div v-else-if="selectionMode === 'keywords'" class="keyword-panel">
+            <div class="keyword-entry"><label for="keyword-input">Ajouter un mot-clé au périmètre</label><div><input id="keyword-input" v-model="keywordInput" type="text" placeholder="Ex. enseignement supérieur" @keydown.enter.prevent="addKeyword()"><button type="button" :disabled="!keywordInput.trim()" @click="addKeyword()"><i class="ri-add-line" aria-hidden="true" /> Ajouter</button></div><small>Le mot-clé sera utilisé comme filtre de catalogue dans la configuration de la verticale.</small></div>
+            <div v-if="selectedKeywords.length" class="selected-keywords"><p>Mots-clés retenus</p><div><span v-for="keyword in selectedKeywords" :key="keyword">{{ keyword }}<button type="button" :aria-label="`Retirer ${keyword}`" @click="removeKeyword(keyword)"><i class="ri-close-line" aria-hidden="true" /></button></span></div></div>
+            <div class="suggested-keywords"><p>Mots-clés présents dans les résultats actuels</p><div v-if="suggestedKeywords.length"><button v-for="keyword in suggestedKeywords" :key="keyword" type="button" :disabled="selectedKeywords.includes(keyword)" @click="addKeyword(keyword)"><i class="ri-price-tag-3-line" aria-hidden="true" /> {{ keyword }}</button></div><span v-else>Lancez d’abord une recherche de jeux de données pour obtenir des suggestions issues du catalogue.</span></div>
+          </div>
+          <div v-else class="empty-results"><i class="ri-folder-search-line" aria-hidden="true" /><p>Aucun résultat trouvé.</p><span>Essayez un terme plus précis ou un synonyme.</span></div>
           <footer class="selection-footer">
-            <p><strong>{{ selectedDatasetIds.length }}</strong> jeu{{ selectedDatasetIds.length > 1 ? 'x' : '' }} de données dans le périmètre provisoire</p>
-            <button type="button" :disabled="!selectedDatasetIds.length">Valider la sélection <i class="ri-arrow-right-line" aria-hidden="true" /></button>
+            <p><strong>{{ selectedOrganizations.length }}</strong> organisation{{ selectedOrganizations.length > 1 ? 's' : '' }} · <strong>{{ selectedKeywords.length }}</strong> mot{{ selectedKeywords.length > 1 ? 's' : '' }}-clé{{ selectedKeywords.length > 1 ? 's' : '' }} · <strong>{{ selectedDatasetIds.length }}</strong> jeu{{ selectedDatasetIds.length > 1 ? 'x' : '' }}</p>
+            <button type="button" :disabled="!totalRules">Valider le périmètre <i class="ri-arrow-right-line" aria-hidden="true" /></button>
           </footer>
         </section>
       </Transition>

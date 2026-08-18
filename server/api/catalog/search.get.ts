@@ -5,7 +5,8 @@ type DatagouvDataset = {
   description?: string
   last_update?: string
   resources?: unknown[]
-  organization?: { name?: string; logo?: string }
+  organization?: { id?: string; name?: string; logo?: string }
+  tags?: string[]
   owner?: { first_name?: string; last_name?: string }
 }
 
@@ -28,9 +29,11 @@ export default defineEventHandler(async (event) => {
       title: dataset.title.trim(),
       description: (dataset.description ?? "").replace(/[#*_`>\[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, 280),
       organization: dataset.organization?.name ?? ([dataset.owner?.first_name, dataset.owner?.last_name].filter(Boolean).join(" ") || "Producteur individuel"),
+      organizationId: dataset.organization?.id,
       organizationLogo: dataset.organization?.logo,
       resources: dataset.resources?.length ?? 0,
       lastUpdate: dataset.last_update,
+      tags: dataset.tags ?? [],
       url: `https://www.data.gouv.fr/datasets/${dataset.slug}/`,
     })),
   }
