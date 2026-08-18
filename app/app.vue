@@ -7,6 +7,23 @@ const examples = [
 
 const prompt = ref("")
 const hasStarted = ref(false)
+const framingSaved = ref(false)
+const audienceInput = ref("")
+const framing = reactive({
+  title: "",
+  purpose: "Rendre un ensemble de données publiques plus facile à trouver, comprendre et réutiliser.",
+  audiences: [] as string[],
+  objectives: "Permettre aux utilisateurs d’identifier les données utiles, de comprendre leur contexte et d’accéder aux ressources publiées sur data.gouv.fr.",
+})
+
+function inferFraming() {
+  const education = /éducation|famill|chercheur|collectivit/i.test(prompt.value)
+  const health = /santé|air|eau|environnement/i.test(prompt.value)
+  const local = /citoyen|territoire|service|équipement/i.test(prompt.value)
+  framing.title = education ? "Données de l’éducation" : health ? "Santé environnementale" : local ? "Données de la vie locale" : "Portail thématique"
+  framing.audiences = education ? ["Collectivités", "Chercheurs", "Familles"] : health ? ["Citoyens", "Professionnels de santé", "Décideurs publics"] : local ? ["Citoyens", "Agents publics", "Associations"] : ["Citoyens", "Professionnels", "Acteurs publics"]
+  framingSaved.value = false
+}
 
 function useExample(value: string) {
   prompt.value = value
@@ -15,8 +32,24 @@ function useExample(value: string) {
 
 function startFraming() {
   if (!prompt.value.trim()) return
+  inferFraming()
   hasStarted.value = true
   nextTick(() => document.querySelector("#framing-result")?.scrollIntoView({ behavior: "smooth", block: "center" }))
+}
+
+function addAudience() {
+  const value = audienceInput.value.trim()
+  if (value && !framing.audiences.some(item => item.toLocaleLowerCase() === value.toLocaleLowerCase())) framing.audiences.push(value)
+  audienceInput.value = ""
+}
+
+function removeAudience(index: number) {
+  framing.audiences.splice(index, 1)
+}
+
+function saveFraming() {
+  framingSaved.value = true
+  nextTick(() => document.querySelector("#next-step")?.scrollIntoView({ behavior: "smooth", block: "center" }))
 }
 </script>
 
@@ -67,15 +100,44 @@ function startFraming() {
             <span class="status"><i class="ri-checkbox-circle-line" aria-hidden="true" /> Brouillon</span>
           </div>
           <blockquote>{{ prompt }}</blockquote>
-          <div class="framing-grid">
-            <article><i class="ri-focus-3-line" aria-hidden="true" /><div><h3>Finalité</h3><p>Rendre un ensemble de données publiques plus facile à trouver, comprendre et réutiliser.</p></div></article>
-            <article><i class="ri-team-line" aria-hidden="true" /><div><h3>Publics</h3><p>Le studio identifiera les publics cités et vous demandera de confirmer leurs besoins prioritaires.</p></div></article>
-            <article><i class="ri-database-2-line" aria-hidden="true" /><div><h3>Périmètre de données</h3><p>Les organisations, thèmes et jeux de données data.gouv.fr seront recherchés à l’étape suivante.</p></div></article>
+          <div class="framing-form">
+            <label class="field field-wide">
+              <span><i class="ri-layout-top-line" aria-hidden="true" /> Nom de travail</span>
+              <input v-model="framing.title" type="text" @input="framingSaved = false">
+              <small>Ce nom reste provisoire. L’identité définitive sera travaillée plus tard.</small>
+            </label>
+            <label class="field field-wide">
+              <span><i class="ri-focus-3-line" aria-hidden="true" /> Finalité</span>
+              <textarea v-model="framing.purpose" rows="3" @input="framingSaved = false" />
+              <small>Pourquoi cette verticale doit-elle exister&nbsp;?</small>
+            </label>
+            <div class="field field-wide">
+              <span><i class="ri-team-line" aria-hidden="true" /> Publics prioritaires</span>
+              <div class="tag-editor">
+                <span v-for="(audience, index) in framing.audiences" :key="audience" class="audience-tag">{{ audience }}<button type="button" :aria-label="`Retirer ${audience}`" @click="removeAudience(index); framingSaved = false"><i class="ri-close-line" aria-hidden="true" /></button></span>
+                <input v-model="audienceInput" type="text" placeholder="Ajouter un public" @keydown.enter.prevent="addAudience">
+                <button class="add-tag" type="button" :disabled="!audienceInput.trim()" @click="addAudience"><i class="ri-add-line" aria-hidden="true" /> Ajouter</button>
+              </div>
+              <small>Ajoutez les groupes qui utiliseront réellement le portail.</small>
+            </div>
+            <label class="field field-wide">
+              <span><i class="ri-flag-line" aria-hidden="true" /> Objectifs pour les utilisateurs</span>
+              <textarea v-model="framing.objectives" rows="3" @input="framingSaved = false" />
+              <small>Que doivent-ils pouvoir trouver, comprendre ou accomplir&nbsp;?</small>
+            </label>
           </div>
           <div class="result-actions">
             <button class="secondary-button" type="button" @click="hasStarted = false"><i class="ri-edit-line" aria-hidden="true" /> Modifier</button>
-            <button class="primary-button" type="button">Confirmer et continuer <i class="ri-arrow-right-line" aria-hidden="true" /></button>
+            <button class="primary-button" type="button" :disabled="!framing.title.trim() || !framing.purpose.trim() || !framing.audiences.length || !framing.objectives.trim()" @click="saveFraming">Enregistrer le cadrage <i class="ri-check-line" aria-hidden="true" /></button>
           </div>
+        </section>
+      </Transition>
+
+      <Transition name="framing">
+        <section v-if="framingSaved" id="next-step" class="next-step" aria-live="polite">
+          <div class="next-icon"><i class="ri-search-eye-line" aria-hidden="true" /></div>
+          <div><p class="section-kicker">Étape suivante</p><h2>Identifier les données de la verticale</h2><p>Le cadrage est enregistré localement. Nous pouvons maintenant rechercher les organisations et jeux de données pertinents sur data.gouv.fr.</p></div>
+          <button type="button">Commencer la sélection <i class="ri-arrow-right-line" aria-hidden="true" /></button>
         </section>
       </Transition>
 
